@@ -16,3 +16,10 @@ Update existing project environment:
 The project notebooks are meant to be run in jupyter lab:
 
 	jupyter lab
+    
+## Other
+
+To register an environment in the jupyter notebook, first switch to that env and then run:
+
+    conda activate proj-5138
+    python -m ipykernel install --user --name=proj-5138
