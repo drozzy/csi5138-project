@@ -9,71 +9,41 @@ import shutil
 from functools import partial
 
 ## Setup input pipline
+data_path = 'data'
 
 def get_datasets():
-    (train_examples, test_examples), metadata = tfds.load('imdb_reviews',  data_dir=data_path,
+    (train_examples, test_examples), info = tfds.load('imdb_reviews/subwords8k',  data_dir=data_path,
     split=['train', 'test'],
     with_info=True, as_supervised=True)
-    return train_examples, test_examples
+    return train_examples, test_examples, info
 
 
-def transform_datasets(train_examples, test_examples, tokenizer, batch_size, max_length, buffer_size):
+def transform_datasets(train_examples, test_examples, encoder, batch_size, max_length, buffer_size):
     """
     Use [TFDS](https://www.tensorflow.org/datasets) to load the IMDB movie reviews dataset with labels for positive or negative sentiments.
 
     This dataset contains 25000 training examples and 25000 test examples.
     Note: To keep this example small and relatively fast, drop examples with some max length.
     """
-    def encode(review, sentiment):
-        return tokenizer.encode(review.numpy()), tf.expand_dims(sentiment, 0)
-
-    def tf_encode(review, sentiment):
-        """ Operations inside `.map()` run in graph mode and receive a graph
-        tensor that do not have a numpy attribute. The `tokenizer` expects a string or
-        Unicode symbol to encode it into integers. Hence, you need to run the encoding
-        inside a `tf.py_function`, which receives an eager tensor having a numpy
-        attribute that contains the string value. """
-        return tf.py_function(encode, [review, sentiment], [tf.int64, tf.int64])
-
-
+   
     def filter_max_length(review, _sentiment):
         return tf.size(review) <= max_length
 
-    train_dataset = train_examples.map(tf_encode)
-    train_dataset = train_dataset.filter(filter_max_length)
+    train_dataset = train_examples.filter(filter_max_length)
     # cache the dataset to memory to get a speedup while reading from it.
     train_dataset = train_dataset.cache()
     train_dataset = train_dataset.shuffle(buffer_size).padded_batch(
-        batch_size, padded_shapes=([-1], [-1]))
+        batch_size, padded_shapes=train_examples.output_shapes)
     train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
-    test_dataset = test_examples.map(tf_encode)
-    test_dataset = test_dataset.filter(filter_max_length)
+    test_dataset = test_examples.filter(filter_max_length)
     test_dataset = test_dataset.padded_batch(
-        batch_size, padded_shapes=([-1], [-1]))
+        batch_size, padded_shapes=train_examples.output_shapes)
 
     return train_dataset, test_dataset
-    # Create a custom subwords tokenizer from the training dataset. 
-
-def create_tokenizer(train_examples):
-    if os.path.exists(path_to('imdb.subwords')):
-        print("Subwords found. Loading.")
-        tokenizer = tfds.features.text.SubwordTextEncoder.load_from_file(path_to('imdb'))
-    else:
-        print("No tokenized subwords found. Creating and saving.")
-        tokenizer = tfds.features.text.SubwordTextEncoder.build_from_corpus(
-            (review.numpy() for (review, sent) in train_examples), 
-            target_vocab_size=2**13)
-        tokenizer.save_to_file('imdb')
-        shutil.move('imdb.subwords', path_to('data/imdb.subwords'))
-    return tokenizer
-
-data_path = 'data'
-
 
 def path_to(fname):
     return os.path.join(data_path, fname)
-
 
 
 ## Checkpoint manager
@@ -394,9 +364,9 @@ class CustomSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
 
 ## Evaluate
 
-def evaluate(inp_sentence, tokenizer, transformer):
-    # inp sentence is the review
-    inp_sentence = tokenizer.encode(inp_sentence)
+def evaluate(inp_sentence, encoder, transformer):
+    # inp sentence is the review  
+    inp_sentence = encoder.encode(inp_sentence)  
     encoder_input = tf.expand_dims(inp_sentence, 0)
     
     enc_padding_mask = create_padding_mask(encoder_input)
@@ -412,8 +382,8 @@ def evaluate(inp_sentence, tokenizer, transformer):
         sent = 'neg'
     return sent, attention_weights
 
-def sentiment(review, tokenizer, transformer, plot=''):
-    sentiment, attention_weights = evaluate(review, tokenizer, transformer)
+def sentiment(review, encoder, transformer, plot=''):
+    sentiment, attention_weights = evaluate(review, encoder, transformer)
   
     print('Input: {}'.format(review))
     print('Predicted sentiment: {}'.format(sentiment))
