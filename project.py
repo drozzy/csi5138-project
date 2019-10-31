@@ -47,7 +47,7 @@ def path_to(fname):
 
 
 ## Checkpoint manager
-def create_checkpoint_manager(transformer, optimizer):
+def create_checkpoint_manager(transformer, optimizer, max_to_keep):
     """
     Create the checkpoint path and the checkpoint manager. This will be used to save checkpoints every `n` epochs.
     """
@@ -56,7 +56,7 @@ def create_checkpoint_manager(transformer, optimizer):
     ckpt = tf.train.Checkpoint(transformer=transformer,
                                optimizer=optimizer)
 
-    ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=5)
+    ckpt_manager = tf.train.CheckpointManager(ckpt, checkpoint_path, max_to_keep=max_to_keep)
 
     # if a checkpoint exists, restore the latest checkpoint.
     if ckpt_manager.latest_checkpoint:
