@@ -290,7 +290,6 @@ class Encoder(tf.keras.layers.Layer):
         self.dropout = tf.keras.layers.Dropout(rate)
 
     def call(self, x, training, mask):
-
         seq_len = tf.shape(x)[1]
         attention_weights = {}
         # adding embedding and position encoding.
@@ -319,11 +318,15 @@ class TransformerEncoderClassifier(tf.keras.Model):
                                input_vocab_size, pe_input, rate)
 
         self.final_layer = tf.keras.layers.Dense(1)
+        self.last_attention_weights = None
 
-    def call(self, inp, training, enc_padding_mask):
+    def call(self, inp, training):
         # enc_padding_mask.shape == (batch_size, 1, 1, seq_len)  - Andriy
-        enc_output, attention_weights = self.encoder(inp, training, enc_padding_mask)  # (batch_size, seq_len, d_model)
 
+        enc_padding_mask = create_padding_mask(inp)
+        
+        
+        enc_output, self.last_attention_weights = self.encoder(inp, training, enc_padding_mask)  # (batch_size, seq_len, d_model)
         # enc_output.shape == (batch_size, seq_len, d_model)
         
         if enc_padding_mask is not None:
@@ -334,13 +337,11 @@ class TransformerEncoderClassifier(tf.keras.Model):
             
             # Keep only non-padded entries for the sum ahead
             enc_output = enc_output * sum_mask
-
         enc_output = tf.reduce_sum(enc_output, 1)
         final_output = self.final_layer(enc_output)
             
         final_output = tf.squeeze(final_output, 1)     
-        
-        return final_output, attention_weights
+        return final_output
 
 ## Optimizer
 
@@ -368,11 +369,8 @@ def evaluate(inp_sentence, encoder, transformer):
     # inp sentence is the review  
     inp_sentence = encoder.encode(inp_sentence)  
     encoder_input = tf.expand_dims(inp_sentence, 0)
-    
-    enc_padding_mask = create_padding_mask(encoder_input)
-    predictions, attention_weights = transformer(encoder_input,
-                                                 False,
-                                                 enc_padding_mask)
+
+    predictions = transformer(encoder_input, False)
    
     sent = tf.squeeze(predictions, axis=0)
     sent = tf.sigmoid(sent)
@@ -380,10 +378,10 @@ def evaluate(inp_sentence, encoder, transformer):
         sent = 'pos'
     else:
         sent = 'neg'
-    return sent, attention_weights
+    return sent
 
 def sentiment(review, encoder, transformer, plot=''):
-    sentiment, attention_weights = evaluate(review, encoder, transformer)
+    sentiment = evaluate(review, encoder, transformer)
   
     print('Input: {}'.format(review))
     print('Predicted sentiment: {}'.format(sentiment))
