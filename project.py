@@ -341,7 +341,7 @@ class TransformerEncoderClassifier(tf.keras.Model):
         final_output = self.final_layer(enc_output)
             
         final_output = tf.squeeze(final_output, 1)     
-        return final_output
+        return tf.sigmoid(final_output)
 
 ## Optimizer
 
