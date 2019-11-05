@@ -29,13 +29,18 @@ def experiment(max_epochs, use_positional_encoding, load_checkpoint):
     param_metrics = ParameterMetrics(use_positional_encoding)
     history = fit_data(max_epochs, transformer, train_dataset, test_dataset, param_metrics)
 
-    eval_loss, eval_acc = transformer.evaluate(test_dataset)
+    csv = cb.CSVLogger('eval.csv', append=True)
+    eval_loss, eval_acc = transformer.evaluate(test_dataset,
+        callbacks=[param_metrics, csv])
+
     print(f'[Evaluate] Best Loss: {eval_loss}, Best Acc: {eval_acc}')
+    
+    return history.epoch
 
 def fit_data(max_epochs, model, train_dataset, test_dataset, param_metrics):
 
     tb = cb.TensorBoard()
-    csv = cb.CSVLogger('results.csv', append=True)
+    csv = cb.CSVLogger('train.csv', append=True)
     early = cb.EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)
     save = cb.ModelCheckpoint(filepath="checkpoints/train",
              monitor='val_accuracy',
