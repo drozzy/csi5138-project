@@ -29,13 +29,7 @@ def experiment(max_epochs, use_positional_encoding, load_checkpoint):
     param_metrics = ParameterMetrics(use_positional_encoding)
     history = fit_data(max_epochs, transformer, train_dataset, test_dataset, param_metrics)
 
-    csv = cb.CSVLogger('eval.csv', append=True)
-    eval_loss, eval_acc = transformer.evaluate(test_dataset,
-        callbacks=[param_metrics, csv])
-
-    print(f'[Evaluate] Best Loss: {eval_loss}, Best Acc: {eval_acc}')
-    
-    return history.epoch
+    return history
 
 def fit_data(max_epochs, model, train_dataset, test_dataset, param_metrics):
 
