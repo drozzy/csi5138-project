@@ -4,11 +4,11 @@ from model import *
 from data  import get_datasets
 from tensorflow.keras.callbacks import Callback
 
-def study(epochs):
+def study(max_epochs):
     positional_encoding = [True, False]
 
     for p in positional_encoding:
-        experiment(epochs, use_positional_encoding=p, load_checkpoint=False)
+        experiment(max_epochs, use_positional_encoding=p, load_checkpoint=False)
 
 class ParameterMetrics(Callback):
     def __init__(self, use_positional_encoding):
@@ -18,7 +18,7 @@ class ParameterMetrics(Callback):
     def on_epoch_end(self, epoch, logs):
         logs['use_positional_encoding'] = int(self.use_positional_encoding)
 
-def experiment(epochs, use_positional_encoding, load_checkpoint):
+def experiment(max_epochs, use_positional_encoding, load_checkpoint):
     print(f"Experiment: Positional Encoding={use_positional_encoding}")
 
     train_dataset, test_dataset, info = get_datasets()    
@@ -27,15 +27,15 @@ def experiment(epochs, use_positional_encoding, load_checkpoint):
     transformer = create_model(load_checkpoint, vocab_size, use_positional_encoding)
 
     param_metrics = ParameterMetrics(use_positional_encoding)
-    history = fit_data(epochs, transformer, train_dataset, test_dataset, param_metrics)
+    history = fit_data(max_epochs, transformer, train_dataset, test_dataset, param_metrics)
 
     eval_loss, eval_acc = transformer.evaluate(test_dataset)
     print(f'[Evaluate] Best Loss: {eval_loss}, Best Acc: {eval_acc}')
 
-def fit_data(epochs, model, train_dataset, test_dataset, param_metrics):
+def fit_data(max_epochs, model, train_dataset, test_dataset, param_metrics):
 
     tb = cb.TensorBoard()
-    csv = cb.CSVLogger('results.csv')
+    csv = cb.CSVLogger('results.csv', append=True)
     early = cb.EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)
     save = cb.ModelCheckpoint(filepath="checkpoints/train",
              monitor='val_accuracy',
@@ -48,7 +48,7 @@ def fit_data(epochs, model, train_dataset, test_dataset, param_metrics):
         shuffle=False,
         verbose=1,
         callbacks=[param_metrics, save, early, tb, csv],
-        epochs=epochs)
+        epochs=max_epochs)
     return model_history
 
 def create_model(load_checkpoint, vocab_size, use_positional_encoding):
@@ -80,4 +80,4 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding):
 
 
 if __name__ == '__main__':
-    study(epochs=5)
+    study(max_epochs=100)
