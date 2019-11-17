@@ -2,9 +2,9 @@
 
 ## Setup
 
-Create new environment (use "envrionment-cpu.yml" if you don't have a GPU):
+Create new environment (use "envrionment_cpu.yml" if you don't have a GPU):
 
-	conda env create -f environment-gpu.yml
+	conda env create -f environment_gpu.yml
 	conda activate csi5138-project
 
 Update existing project environment:
