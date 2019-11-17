@@ -1,4 +1,4 @@
-name: proj-5138
+name: csi5138-project
 channels:
   - anaconda
   - conda-forge
@@ -9,10 +9,8 @@ dependencies:
   - pip=19.3.1
   - jupyterlab=1.1.4
   - ipywidgets=7.5.1
-  - cudatoolkit=10.0
-  - cudnn
   - nodejs=10.13.0
   - pip:
     - matplotlib==3.1.1
     - tensorflow-datasets==1.3.0
-    - tensorflow-gpu==2.0.0
+    - tensorflow==2.0.0
