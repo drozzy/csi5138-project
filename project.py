@@ -373,7 +373,6 @@ def evaluate(inp_sentence, encoder, transformer):
     predictions = transformer(encoder_input, False)
    
     sent = tf.squeeze(predictions, axis=0)
-    sent = tf.sigmoid(sent)
     if sent >= 0.5:
         sent = 'pos'
     else:
