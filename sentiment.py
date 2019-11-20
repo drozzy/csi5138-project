@@ -6,7 +6,7 @@ def sentiment(inp_sentence, encoder, transformer):
     inp_sentence = encoder.encode(inp_sentence)  
     encoder_input = tf.expand_dims(inp_sentence, 0)
 
-    predictions = transformer(encoder_input, False)
+    predictions = transformer(encoder_input, training=False)
    
     sent = tf.squeeze(predictions, axis=0)
     if sent >= 0.5:
