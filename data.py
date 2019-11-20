@@ -1,6 +1,11 @@
 import tensorflow_datasets as tfds
 import tensorflow as tf
 
+DATA_DIR = 'data'
+BUFFER_SIZE = 20000
+BATCH_SIZE = 64
+MAX_LENGTH = 200
+
 ## Setup input pipline
 def get_datasets():
     """
@@ -9,11 +14,6 @@ def get_datasets():
     This dataset contains 25000 training examples and 25000 test examples.
     Note: To keep this example small and relatively fast, drop examples with some max length.
     """
-    DATA_DIR = 'data'
-    BUFFER_SIZE = 20000
-    BATCH_SIZE = 64
-    MAX_LENGTH = 200
-
     (train_examples, test_examples), info = tfds.load('imdb_reviews/subwords8k',  data_dir=DATA_DIR,
     split=['train', 'test'],
     with_info=True, as_supervised=True)
@@ -32,4 +32,4 @@ def get_datasets():
     test_dataset = test_dataset.padded_batch(
         BATCH_SIZE, padded_shapes=train_examples.output_shapes)
 
-    return train_dataset, test_dataset, info
+    return (train_dataset, test_dataset), info

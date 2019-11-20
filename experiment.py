@@ -1,6 +1,6 @@
 import tensorflow as tf
 import tensorflow.keras.callbacks as cb
-from model import *
+from model import TransformerEncoderClassifier
 from data  import get_datasets
 from tensorflow.keras.callbacks import Callback
 
@@ -21,17 +21,17 @@ class ParameterMetrics(Callback):
 def experiment(max_epochs, use_positional_encoding, load_checkpoint):
     print(f"Experiment: Positional Encoding={use_positional_encoding}")
 
-    train_dataset, test_dataset, info = get_datasets()    
+    (train_dataset, test_dataset), info = get_datasets()    
     vocab_size = info.features['text'].encoder.vocab_size 
     
     transformer = create_model(load_checkpoint, vocab_size, use_positional_encoding)
 
     param_metrics = ParameterMetrics(use_positional_encoding)
-    history = fit_data(max_epochs, transformer, train_dataset, test_dataset, param_metrics)
+    history = fit_data(max_epochs, transformer, train_dataset, test_dataset, [param_metrics])
 
     return history
 
-def fit_data(max_epochs, model, train_dataset, test_dataset, param_metrics):
+def fit_data(max_epochs, model, train_dataset, test_dataset, prepend_callbacks=[]):
 
     tb = cb.TensorBoard()
     csv = cb.CSVLogger('train.csv', append=True)
@@ -46,11 +46,11 @@ def fit_data(max_epochs, model, train_dataset, test_dataset, param_metrics):
         validation_freq=1,
         shuffle=False,
         verbose=1,
-        callbacks=[param_metrics, save, early, tb, csv],
+        callbacks= (prepend_callbacks + [save, early, tb, csv]),
         epochs=max_epochs)
     return model_history
 
-def create_model(load_checkpoint, vocab_size, use_positional_encoding):
+def create_model(load_checkpoint, vocab_size, use_positional_encoding, run_eagerly=False):
     
     num_layers = 4
     d_model = 128
@@ -65,7 +65,7 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding):
 
 
     loss_function = tf.keras.losses.BinaryCrossentropy(from_logits=True)
-    # transformer.run_eagerly = True
+    transformer.run_eagerly = run_eagerly
     transformer.compile(optimizer=tf.keras.optimizers.Adam(), 
         loss=loss_function, metrics=['accuracy'])
 
