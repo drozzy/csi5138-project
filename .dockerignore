@@ -1,0 +1,8 @@
+## Ignore everything
+**
+
+# except for:
+!/data.py
+!/model.py
+!/experiment.py
+!/requirements.txt
