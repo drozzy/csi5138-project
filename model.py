@@ -39,7 +39,7 @@ def create_padding_mask(seq):
 
 ## Scaled Dot Product Attention
 
-def scaled_dot_product_attention(q, k, v, mask, permute_attention):
+def scaled_dot_product_attention(q, k, v, mask, attention_weights_fn):
     """Calculate the attention weights.
     q, k, v must have matching leading dimensions.
     k, v must have matching penultimate dimension, i.e.: seq_len_k = seq_len_v.
@@ -71,15 +71,14 @@ def scaled_dot_product_attention(q, k, v, mask, permute_attention):
     # softmax is normalized on the last axis (seq_len_k) so that the scores
     # add up to 1.
     attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
-    if permute_attention:
-        attention_weights = shuffle_weights(attention_weights)
+
+    # if permute_attention:
+    attention_weights = attention_weights_fn(attention_weights)
 
     output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
 
     return output, attention_weights
 
-def shuffle_weights(weights):
-    return tf.transpose(tf.random.shuffle(tf.transpose(weights)))    
 
 ## Multi-Head Attention
 
@@ -102,7 +101,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
     each head has a reduced dimensionality, so the total computation cost is the
     same as a single head attention with full dimensionality.
     """
-    def __init__(self, d_model, num_heads, permute_attention):
+    def __init__(self, d_model, num_heads, attention_weights_fn):
         super(MultiHeadAttention, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
@@ -116,7 +115,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         self.wv = tf.keras.layers.Dense(d_model)
 
         self.dense = tf.keras.layers.Dense(d_model)
-        self.permute_attention = permute_attention
+        self.attention_weights_fn = attention_weights_fn
         
     def split_heads(self, x, batch_size):
         """Split the last dimension into (num_heads, depth).
@@ -139,7 +138,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
         scaled_attention, attention_weights = scaled_dot_product_attention(
-            q, k, v, mask, self.permute_attention)
+            q, k, v, mask, self.attention_weights_fn)
 
         scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len_q, num_heads, depth)
 
@@ -178,10 +177,10 @@ class EncoderLayer(tf.keras.layers.Layer):
     is done on the `d_model` (last) axis. There are N encoder layers in the
     transformer.
     """
-    def __init__(self, d_model, num_heads, dff, rate=0.1, permute_attention=False):
+    def __init__(self, d_model, num_heads, dff, rate=0.1, attention_weights_fn=lambda x: x):
         super(EncoderLayer, self).__init__()
 
-        self.mha = MultiHeadAttention(d_model, num_heads, permute_attention)
+        self.mha = MultiHeadAttention(d_model, num_heads, attention_weights_fn)
         self.ffn = point_wise_feed_forward_network(d_model, dff)
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
@@ -215,7 +214,7 @@ class Encoder(tf.keras.layers.Layer):
     output of the encoder is the input to the decoder. 
     """
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
-               maximum_position_encoding, rate=0.1, use_positional_encoding=True, permute_attention=False):
+               maximum_position_encoding, rate=0.1, use_positional_encoding=True, attention_weights_fn=lambda x: x):
         super().__init__()
 
         self.d_model = d_model
@@ -227,7 +226,7 @@ class Encoder(tf.keras.layers.Layer):
                                                 self.d_model)
 
 
-        self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate, permute_attention) 
+        self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate, attention_weights_fn) 
                            for _ in range(num_layers)]
 
         self.dropout = tf.keras.layers.Dropout(rate)
@@ -255,13 +254,13 @@ class TransformerEncoderClassifier(tf.keras.Model):
     its output is returned. 
     """
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, pe_input, rate=0.1, 
-            use_positional_encoding=True, permute_attention=False):
+            use_positional_encoding=True, attention_weights_fn=lambda x: x):
         super().__init__()
 
         self.encoder = Encoder(num_layers, d_model, num_heads, dff, 
                                input_vocab_size, pe_input, rate, 
                                use_positional_encoding=use_positional_encoding,
-                               permute_attention=permute_attention)
+                               attention_weights_fn=attention_weights_fn)
 
         self.final_layer = tf.keras.layers.Dense(1)
         self.last_attention_weights = None

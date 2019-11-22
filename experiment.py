@@ -11,7 +11,7 @@ def study(results_dir="results", models_dir="checkpoints", data_dir="data", max_
 
     for p in positional_encoding:
         experiment(max_epochs, use_positional_encoding=p, load_checkpoint=False, 
-            results_dir=results_dir, models_dir=results_dir, data_dir=data_dir)
+            results_dir=results_dir, models_dir=models_dir, data_dir=data_dir)
 
 class ParameterMetrics(Callback):
     def __init__(self, use_positional_encoding):
@@ -21,22 +21,25 @@ class ParameterMetrics(Callback):
     def on_epoch_end(self, epoch, logs):
         logs['use_positional_encoding'] = int(self.use_positional_encoding)
 
-def experiment(max_epochs, use_positional_encoding, load_checkpoint, study_dir, data_dir):
+def experiment(max_epochs, use_positional_encoding, load_checkpoint, results_dir, models_dir, data_dir):
     print(f"Experiment: Positional Encoding={use_positional_encoding}")
 
     (train_dataset, test_dataset), info = get_datasets(data_dir)    
     vocab_size = info.features['text'].encoder.vocab_size 
     
-    transformer = create_model(load_checkpoint, vocab_size, use_positional_encoding, study_dir)
+    permute_attention=False
+    
+    transformer = create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_attention, 
+        models_dir, run_eagerly=True)
 
     param_metrics = ParameterMetrics(use_positional_encoding)
-    history = fit_data(max_epochs, transformer, train_dataset, test_dataset, study_dir, [param_metrics])
+    history = fit_data(max_epochs, transformer, train_dataset, test_dataset, results_dir, models_dir, [param_metrics])
 
     return history
 
 def fit_data(max_epochs, model, train_dataset, test_dataset, results_dir="results", 
-        model_dir="checkpoints", prepend_callbacks=[]):
-    model_path=os.path.join(model_dir, "train")
+        models_dir="checkpoints", prepend_callbacks=[]):
+    model_path=os.path.join(models_dir, "train")
 
     tb = cb.TensorBoard()
     csv = cb.CSVLogger(os.path.join(results_dir, 'results.csv'), append=True)
@@ -53,7 +56,11 @@ def fit_data(max_epochs, model, train_dataset, test_dataset, results_dir="result
         verbose=2,
         callbacks= (prepend_callbacks + [save, early, tb, csv]),
         epochs=max_epochs)
+
     return model_history
+
+def shuffle_weights(weights):
+    return tf.transpose(tf.random.shuffle(tf.transpose(weights)))    
 
 def create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_attention,
         models_dir="checkpoints", run_eagerly=False):
@@ -65,10 +72,15 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_a
     
     dropout_rate = 0.1    
 
+    if permute_attention:
+        attention_weights_fn = shuffle_weights
+    else:
+        attention_weights_fn = lambda x: x
+
     transformer = TransformerEncoderClassifier(num_layers, d_model,  num_heads,
     dff, vocab_size, pe_input=vocab_size,  rate=dropout_rate,
     use_positional_encoding=use_positional_encoding,
-    permute_attention=permute_attention)
+    attention_weights_fn=attention_weights_fn)
 
 
     loss_function = tf.keras.losses.BinaryCrossentropy(from_logits=True)
