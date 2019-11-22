@@ -55,7 +55,8 @@ def fit_data(max_epochs, model, train_dataset, test_dataset, results_dir="result
         epochs=max_epochs)
     return model_history
 
-def create_model(load_checkpoint, vocab_size, use_positional_encoding, models_dir="checkpoints", run_eagerly=False):
+def create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_attention,
+        models_dir="checkpoints", run_eagerly=False):
     
     num_layers = 4
     d_model = 128
@@ -66,7 +67,8 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding, models_di
 
     transformer = TransformerEncoderClassifier(num_layers, d_model,  num_heads,
     dff, vocab_size, pe_input=vocab_size,  rate=dropout_rate,
-    use_positional_encoding=use_positional_encoding)
+    use_positional_encoding=use_positional_encoding,
+    permute_attention=permute_attention)
 
 
     loss_function = tf.keras.losses.BinaryCrossentropy(from_logits=True)
