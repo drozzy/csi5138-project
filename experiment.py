@@ -7,6 +7,11 @@ import plac
 import os
 
 def study(results_dir="results", models_dir="checkpoints", data_dir="data", max_epochs=100):
+    if not tf.io.gfile.exists(results_dir):
+        tf.io.gfile.mkdir(results_dir)
+    if not tf.io.gfile.exists(models_dir):
+        tf.io.gfile.mkdir(models_dir)
+
     positional_encoding = [True, False]
 
     for p in positional_encoding:
@@ -28,7 +33,7 @@ def experiment(max_epochs, use_positional_encoding, load_checkpoint, results_dir
     vocab_size = info.features['text'].encoder.vocab_size 
     
     permute_attention=False
-    
+
     transformer = create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_attention, 
         models_dir, run_eagerly=True)
 
@@ -42,7 +47,7 @@ def fit_data(max_epochs, model, train_dataset, test_dataset, results_dir="result
     model_path=os.path.join(models_dir, "train")
 
     tb = cb.TensorBoard()
-    csv = cb.CSVLogger(os.path.join(results_dir, 'results.csv'), append=True)
+    csv = cb.CSVLogger(os.path.join(results_dir, 'results.csv'), append=False)
     early = cb.EarlyStopping(monitor='val_accuracy', patience=5, restore_best_weights=True)
     save = cb.ModelCheckpoint(filepath=model_path,
              monitor='val_accuracy',
