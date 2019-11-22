@@ -3,7 +3,7 @@ FROM tensorflow/tensorflow:2.0.0-gpu-py3
 ADD requirements.txt /
 RUN pip install -r /requirements.txt
 
-ADD project /app
+ADD . /app
 WORKDIR /app
 
 ENTRYPOINT ["python", "experiment.py"]

@@ -10,9 +10,10 @@ REGION = "us-central1"
 
 IMAGE_REPO_NAME="csi5138-project"
 IMAGE_TAG="gpu"
-IMAGE_URI=f'gcr.io/andriy/{IMAGE_REPO_NAME}:{IMAGE_TAG}'
+IMAGE_URI = f'gcr.io/{PROJECT_ID}/{IMAGE_REPO_NAME}:{IMAGE_TAG}'
 
 def build_and_push():
+    print(IMAGE_URI)
     subprocess.run(["docker", "build", "-f", "Dockerfile", "-t", IMAGE_URI, "./"])
     subprocess.run(["docker", "push", IMAGE_URI])
 
