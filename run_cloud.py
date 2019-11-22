@@ -1,7 +1,6 @@
 import subprocess
 from datetime import datetime
 import plac
-import os
 MAX_EPOCHS = 100
 
 PROJECT_ID="andriy"
@@ -27,13 +26,22 @@ def main(job_only: ('Skip and docker building and pushing', 'flag')):
     STUDY = f'study_{timestamp}'
 
     PROJECT_DIR = f'gs://{BUCKET_NAME}/csi5138_project'
-    STUDY_DIR = os.path.join(PROJECT_DIR, f"studies/{STUDY}")
-    DATA_DIR = os.path.join(PROJECT_DIR, "data")
+    STUDY_DIR = f'{PROJECT_DIR}/studies/{STUDY}'
+    DATA_DIR = f'{PROJECT_DIR}/data'
 
-    RESULTS_DIR = os.path.join(STUDY_DIR, "results")
-    MODELS_DIR  = os.path.join(STUDY_DIR, "models")
+    RESULTS_DIR = f'{STUDY_DIR}/results'
+    MODELS_DIR  = f'{STUDY_DIR}/models'
 
-    subprocess.run(["gcloud", "ai-platform", "jobs", "submit", "training", JOB_NAME,
+    print(f'JOB_NAME: {JOB_NAME}')
+    print(f'REGION: {REGION}')
+    print(f'IMAGE_URI: {IMAGE_URI}')
+    print(f'RESULTS_DIR: {RESULTS_DIR}')
+    print(f'MODELS_DIR: {MODELS_DIR}')
+    print(f'DATA_DIR: {DATA_DIR}')
+    print(f'MAX_EPOCHS: {MAX_EPOCHS}')
+    print('--')
+    print(f'PROJECT_DIR: {PROJECT_DIR}')
+    cmd = ["gcloud", "ai-platform", "jobs", "submit", "training", JOB_NAME,
         "--scale-tier", "BASIC_GPU",
         "--region", REGION,
         "--master-image-uri", IMAGE_URI,
@@ -41,10 +49,13 @@ def main(job_only: ('Skip and docker building and pushing', 'flag')):
         RESULTS_DIR,
         MODELS_DIR,
         DATA_DIR,
-        f'{MAX_EPOCHS}'])
-
-    subprocess.run(["gcloud", "ai-platform", "jobs", "describe", JOB_NAME])
-    subprocess.run(["gcloud", "ai-platform", "jobs", "stream-logs", JOB_NAME])
+        f'{MAX_EPOCHS}']
+    print("Command to run: ")
+    print(" ".join(cmd))
+    print('        ')
+    subprocess.run(cmd, check=True, shell=True)
+    subprocess.run(["gcloud", "ai-platform", "jobs", "describe", JOB_NAME], shell=True)
+    subprocess.run(["gcloud", "ai-platform", "jobs", "stream-logs", JOB_NAME], shell=True)
 
 if __name__ == '__main__':
     plac.call(main)
