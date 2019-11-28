@@ -5,7 +5,7 @@ import tensorflow as tf
 class AdversarialWeightGenenerator(tf.keras.Model):
     def __init__(self, input_shape, out_features):
         super().__init__()
-        hidden_size = 64
+        hidden_size = 256
 
         print(f'Input shape is: {input_shape}')
         print(f'Output features: {out_features}')
