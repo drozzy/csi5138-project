@@ -39,7 +39,7 @@ def create_padding_mask(seq):
 
 ## Scaled Dot Product Attention
 
-def scaled_dot_product_attention(q, k, v, mask, attention_weights_fn):
+def scaled_dot_product_attention(q, k, v, mask):
     """Calculate the attention weights.
     q, k, v must have matching leading dimensions.
     k, v must have matching penultimate dimension, i.e.: seq_len_k = seq_len_v.
@@ -52,9 +52,6 @@ def scaled_dot_product_attention(q, k, v, mask, attention_weights_fn):
         v: value shape == (..., seq_len_v, depth_v)
         mask: Float tensor with shape broadcastable 
               to (..., seq_len_q, seq_len_k). Defaults to None.
-        attention_weights_fn: Allows (at inference time) to modify the weights (e.g. shuffle them etc.) (Andriy)
-                              This is to make even non-differentiable operations (e.g. random shuffling) possible.
-
     Returns:
     output, attention_weights
     """
@@ -73,9 +70,6 @@ def scaled_dot_product_attention(q, k, v, mask, attention_weights_fn):
     # softmax is normalized on the last axis (seq_len_k) so that the scores
     # add up to 1.
     attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
-
-    # if permute_attention:
-    attention_weights = attention_weights_fn(attention_weights)
 
     output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
 
@@ -112,11 +106,10 @@ class MultiHeadAttention(tf.keras.layers.Layer):
     each head has a reduced dimensionality, so the total computation cost is the
     same as a single head attention with full dimensionality.
     """
-    def __init__(self, d_model, num_heads, attention_weights_fn, use_custom_attention_weights=False):
+    def __init__(self, d_model, num_heads):
         super(MultiHeadAttention, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
-        self.use_custom_attention_weights = use_custom_attention_weights
 
         assert d_model % self.num_heads == 0
 
@@ -127,7 +120,6 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         self.wv = tf.keras.layers.Dense(d_model)
 
         self.dense = tf.keras.layers.Dense(d_model)
-        self.attention_weights_fn = attention_weights_fn
         
     def split_heads(self, x, batch_size):
         """Split the last dimension into (num_heads, depth).
@@ -150,9 +142,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-        if not self.use_custom_attention_weights:
-            scaled_attention, attention_weights = scaled_dot_product_attention(
-                q, k, v, mask, self.attention_weights_fn)
+        if custom_attention_weights is None:
+            scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
         else:
             scaled_attention, attention_weights = simple_attention(custom_attention_weights, v)
 
@@ -193,12 +184,10 @@ class EncoderLayer(tf.keras.layers.Layer):
     is done on the `d_model` (last) axis. There are N encoder layers in the
     transformer.
     """
-    def __init__(self, d_model, num_heads, dff, rate=0.1, attention_weights_fn=lambda x: x, 
-        use_custom_attention_weights=False):
+    def __init__(self, d_model, num_heads, dff, rate=0.1):
         super(EncoderLayer, self).__init__()
 
-        self.mha = MultiHeadAttention(d_model, num_heads, attention_weights_fn, 
-            use_custom_attention_weights=use_custom_attention_weights)
+        self.mha = MultiHeadAttention(d_model, num_heads)
         self.ffn = point_wise_feed_forward_network(d_model, dff)
 
         self.layernorm1 = tf.keras.layers.LayerNormalization(epsilon=1e-6)
@@ -232,8 +221,7 @@ class Encoder(tf.keras.layers.Layer):
     output of the encoder is the input to the decoder. 
     """
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size,
-               maximum_position_encoding, rate=0.1, use_positional_encoding=True, attention_weights_fn=lambda x: x,
-               use_custom_attention_weights=False):
+               maximum_position_encoding, rate=0.1, use_positional_encoding=True):
         super().__init__()
 
         self.d_model = d_model
@@ -243,14 +231,14 @@ class Encoder(tf.keras.layers.Layer):
         self.embedding = tf.keras.layers.Embedding(input_vocab_size, d_model)
         self.pos_encoding = positional_encoding(maximum_position_encoding, 
                                                 self.d_model)
-        self.use_custom_attention_weights = use_custom_attention_weights
 
-        self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate, attention_weights_fn, 
-            use_custom_attention_weights=use_custom_attention_weights) for _ in range(num_layers)]
 
+        self.enc_layers = [EncoderLayer(d_model, num_heads, dff, rate) for _ in range(num_layers)]
+        
         self.dropout = tf.keras.layers.Dropout(rate)
 
     def call(self, x, training, mask, custom_attention_weights=None):
+
         seq_len = tf.shape(x)[1]
         attention_weights = []
 
@@ -265,9 +253,8 @@ class Encoder(tf.keras.layers.Layer):
         # custom_attention_weights - (num_layers, batch, ...)
         for i in range(self.num_layers):
 
-            x, layer_weights = self.enc_layers[i](x, training, mask, custom_attention_weights=custom_attention_weights[i] if self.use_custom_attention_weights else None)
+            x, layer_weights = self.enc_layers[i](x, training, mask, custom_attention_weights=custom_attention_weights[i] if custom_attention_weights is not None else None)
             attention_weights.append(layer_weights)
-
         attention_weights = tf.stack(attention_weights)                        # (num_layers, batch, ...)
         attention_weights = tf.transpose(attention_weights, perm=[1, 0, 2, 3, 4]) 
 
@@ -280,39 +267,30 @@ class TransformerEncoderClassifier(tf.keras.Model):
     its output is returned. 
     """
     def __init__(self, num_layers, d_model, num_heads, dff, input_vocab_size, pe_input, rate=0.1, 
-            use_positional_encoding=True, attention_weights_fn=lambda x: x, use_custom_attention_weights=False):
+            use_positional_encoding=True):
         super().__init__()
-
         self.encoder = Encoder(num_layers, d_model, num_heads, dff, 
                                input_vocab_size, pe_input, rate, 
-                               use_positional_encoding=use_positional_encoding,
-                               attention_weights_fn=attention_weights_fn, use_custom_attention_weights=use_custom_attention_weights)
-
-        self.use_custom_attention_weights = use_custom_attention_weights
+                               use_positional_encoding=use_positional_encoding)
         self.final_layer = tf.keras.layers.Dense(1)
         
     def call(self, inp, training, custom_attention_weights=None):
         # enc_padding_mask.shape == (batch_size, 1, 1, seq_len)  - Andriy
 
         enc_padding_mask = create_padding_mask(inp)
-        
-        if self.use_custom_attention_weights:
+        if custom_attention_weights is not None:
             # Switch batch and num layers dimensions
             custom_attention_weights = tf.transpose(custom_attention_weights, perm=[1, 0, 2, 3, 4]) # (num_layers, batch, num_heads, seqlen, seqlen)
-
         enc_output, attention_weights = self.encoder(inp, training, enc_padding_mask, custom_attention_weights=custom_attention_weights)  # (batch_size, seq_len, d_model)
         # enc_output.shape == (batch_size, seq_len, d_model)
-        
         if enc_padding_mask is not None:
             enc_padding_mask = tf.squeeze(enc_padding_mask, [1, 2]) # (batch_size, seq_len)
             sum_mask = 1 - enc_padding_mask
             sum_mask = tf.expand_dims(sum_mask, 2) # (batch_size, seq_len, 1)
             
-            
             # Keep only non-padded entries for the sum ahead
             enc_output = enc_output * sum_mask
         enc_output = tf.reduce_sum(enc_output, 1)
         final_output = self.final_layer(enc_output)
-            
         final_output = tf.squeeze(final_output, 1)     
         return final_output, attention_weights

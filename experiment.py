@@ -18,27 +18,16 @@ def study(results_dir="results", models_dir="models", data_dir="data", max_epoch
         experiment(max_epochs, use_positional_encoding=p, load_checkpoint=load_checkpoint, 
             results_dir=results_dir, models_dir=os.path.join(models_dir, f"pos_enc_{p}"), data_dir=data_dir)
 
-class ParameterMetrics(Callback):
-    def __init__(self, use_positional_encoding):
-        super().__init__()
-        self.use_positional_encoding = use_positional_encoding
-
-    def on_epoch_end(self, epoch, logs):
-        logs['use_positional_encoding'] = int(self.use_positional_encoding)
-
 def experiment(max_epochs, use_positional_encoding, load_checkpoint, results_dir, models_dir, data_dir):
     print(f"Experiment: Positional Encoding={use_positional_encoding}")
 
     (train_dataset, test_dataset), info = get_datasets(data_dir)    
     vocab_size = info.features['text'].encoder.vocab_size 
     
-    permute_attention=False
-
-    transformer, optimizer, checkpoint, manager = create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_attention, 
+    transformer, optimizer, checkpoint, manager = create_model(load_checkpoint, vocab_size, use_positional_encoding, 
         models_dir, run_eagerly=True)
 
-    # param_metrics = ParameterMetrics(use_positional_encoding)
-    history = fit_data(max_epochs, transformer, optimizer, checkpoint, manager, train_dataset, test_dataset, results_dir, models_dir) #, [param_metrics])
+    history = fit_data(max_epochs, transformer, optimizer, checkpoint, manager, train_dataset, test_dataset, results_dir, models_dir)
 
     return history
 
@@ -142,13 +131,11 @@ def report_progress(train_metrics, test_metrics=None):
     if test_metrics is not None:
         print(f'\t Test Accuracy={test_metrics.result().numpy()}')
 
-
-
 def shuffle_weights(weights):
     return tf.transpose(tf.random.shuffle(tf.transpose(weights)))    
 
-def create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_attention,
-        models_dir="checkpoints", run_eagerly=False, use_custom_attention_weights=False):
+def create_model(load_checkpoint, vocab_size, use_positional_encoding, 
+        models_dir="checkpoints", run_eagerly=False):
     
     num_layers = 4
     d_model = 128
@@ -157,17 +144,9 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding, permute_a
     
     dropout_rate = 0.1    
 
-    if permute_attention:
-        attention_weights_fn = shuffle_weights
-    else:
-        attention_weights_fn = lambda x: x
-
     transformer = TransformerEncoderClassifier(num_layers, d_model,  num_heads,
         dff, vocab_size, pe_input=vocab_size, rate=dropout_rate,
-        use_positional_encoding=use_positional_encoding,
-        attention_weights_fn=attention_weights_fn,
-        use_custom_attention_weights=use_custom_attention_weights)
-
+        use_positional_encoding=use_positional_encoding)
 
     # loss_function = tf.keras.losses.BinaryCrossentropy(from_logits=True)
     transformer.run_eagerly = run_eagerly
