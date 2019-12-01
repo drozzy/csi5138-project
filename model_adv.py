@@ -2,7 +2,7 @@
 # Create adversarial weight generator model
 # Test it 
 import tensorflow as tf
-class AdversarialWeightGenenerator(tf.keras.Model):
+class Adversarial(tf.keras.Model):
     def __init__(self, input_shape, out_features):
         super().__init__()
         hidden_size = 256
