@@ -1,35 +1,20 @@
-# TODO:
-# Create adversarial weight generator model
-# Test it 
 import tensorflow as tf
+
 class Adversarial(tf.keras.Model):
-    def __init__(self, input_shape, out_features):
+    def __init__(self, d_model):
         super().__init__()
+        
         hidden_size = 256
 
-        print(f'Input shape is: {input_shape}')
-        print(f'Output features: {out_features}')
-        self.d1 = tf.keras.layers.Dense(hidden_size, input_shape=input_shape)
-        self.d2 = tf.keras.layers.Dense(out_features)
+        self.d1 = tf.keras.layers.Dense(hidden_size, input_shape=(d_model,), activation='relu')
+        self.d2 = tf.keras.layers.Dense(d_model)
 
-    def call(self, x): # Input is a weight: (batch, num_layers, seq_len, seq_len)
+    def call(self, k): # Input is "k"-value: (batch, seq_len, d_model) or just (..., d_model) as the first two are batch dims
+        return self.d2(self.d1(k))
 
-        # mask = create_padding_mask(x)
-        # mask = tf.squeeze(mask, [1, 2]) # (batch_size, seq_len)
-        # sum_mask = 1 - mask
-        # sum_mask = tf.expand_dims(sum_mask, 2) # (batch_size, seq_len, 1)
-        
-        weights = self.d2(self.d1(x))
+def create_model(models_dir, load_checkpoint, run_eagerly=True, d_model=512):
 
-        # Keep only non-padded entries for the sum ahead - TODO 
-        weights = weights #* sum_mask
-
-        return tf.nn.softmax(weights)
-
-
-def create_model(models_dir, load_checkpoint, run_eagerly=True, num_layers=4, seq_len=100):
-
-    model = AdversarialWeightGenenerator(input_shape=(num_layers, seq_len, seq_len), out_features=seq_len)
+    model = Adversarial(d_model=d_model)
     model.run_eagerly = run_eagerly
 
     optimizer = tf.keras.optimizers.Adam()    
