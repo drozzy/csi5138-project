@@ -121,15 +121,17 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         
         q = self.wq(q)  # (batch_size, seq_len, d_model)
         if custom_k is not None:
+            # print("Custom K")
             k = custom_k
         else:
+            # print("Non custom k")
             k = self.wk(k)  # (batch_size, seq_len, d_model)
 
         unsplit_k = k
         
         v = self.wv(v)  # (batch_size, seq_len, d_model)
 
-
+        # print(f'k shape: {tf.shape(k)}')
         q = self.split_heads(q, batch_size)  # (batch_size, num_heads, seq_len_q, depth)
         k = self.split_heads(k, batch_size)  # (batch_size, num_heads, seq_len_k, depth)
         v = self.split_heads(v, batch_size)  # (batch_size, num_heads, seq_len_v, depth)
@@ -241,20 +243,22 @@ class Encoder(tf.keras.layers.Layer):
             x += self.pos_encoding[:, :seq_len, :]
 
         x = self.dropout(x, training=training)
-
         # custom_k - (num_layers, batch, ...)
         for i in range(self.num_layers):
             
-            x, layer_weights, k = self.enc_layers[i](x, training, mask, custom_k=custom_k) # All the ks are the same here - keep the last one
+            x, layer_weights, k = self.enc_layers[i](x, training, mask, custom_k=custom_k[i] if custom_k is not None else None) 
+            ks.append(k)
             attention_weights.append(layer_weights)
             
         attention_weights = tf.stack(attention_weights)                        # (num_layers, batch, ...)
         attention_weights = tf.transpose(attention_weights, perm=[1, 0, 2, 3, 4]) 
+        ks = tf.stack(ks)  # (num_layers, batch, seq_len, d_model)
+        ks = tf.transpose(ks, perm=[1, 0, 2, 3]) 
         
 
         return (x,                   # (batch, input_seq_len, d_model)
                attention_weights,    # (batch, num_layers, seq_len, seq_len)
-               k)                    # (batch, seq_len, d_model)
+               ks)                    # (batch, num_layers, seq_len, d_model)
 
 class TransformerEncoderClassifier(tf.keras.Model):
     """ Transformer Encoder Classifier consists of the encoder, and a final
@@ -272,6 +276,8 @@ class TransformerEncoderClassifier(tf.keras.Model):
     def call(self, inp, training, custom_k=None):
         # custom_k == (num_layers, batch, seq_len, d_model)
         # enc_padding_mask.shape == (batch_size, 1, 1, seq_len)  - Andriy
+        if custom_k is not None:
+            custom_k = tf.transpose(custom_k, perm=[1, 0, 2, 3])  # (num_layers, batch, seq_len, d_model)
 
         enc_padding_mask = create_padding_mask(inp)
         enc_output, attention_weights, k = self.encoder(inp, training, enc_padding_mask, custom_k=custom_k)  # (batch_size, seq_len, d_model)
@@ -288,4 +294,4 @@ class TransformerEncoderClassifier(tf.keras.Model):
         final_output = tf.squeeze(final_output, 1)     
         return (final_output,   # (batch, seq_len, d_model)
             attention_weights,  # (batch, num_layers, seq_len, seq_len)
-            k)                  # (batch, seq_len, d_model)
+            k)                  # (batch, num_layers, seq_len, d_model)
