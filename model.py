@@ -75,19 +75,7 @@ def scaled_dot_product_attention(q, k, v, mask):
 
     return output, attention_weights
 
-
-
-def simple_attention(attention_weights, inputs):
-    """
-    Apply attention weights to the inputs.
-    """
-    output = tf.matmul(attention_weights, inputs)
-    return output, attention_weights
-
-
 ## Multi-Head Attention
-
-
 class MultiHeadAttention(tf.keras.layers.Layer):
     """
     Each multi-head attention block gets three inputs; Q (query), K (key), V
@@ -128,11 +116,17 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
         return tf.transpose(x, perm=[0, 2, 1, 3])
     
-    def call(self, v, k, q, mask, custom_attention_weights=None):
+    def call(self, v, k, q, mask, custom_k=None):
         batch_size = tf.shape(q)[0]
         
         q = self.wq(q)  # (batch_size, seq_len, d_model)
-        k = self.wk(k)  # (batch_size, seq_len, d_model)
+        if custom_k is not None:
+            k = custom_k
+        else:
+            k = self.wk(k)  # (batch_size, seq_len, d_model)
+
+        unsplit_k = k
+        
         v = self.wv(v)  # (batch_size, seq_len, d_model)
 
 
@@ -142,10 +136,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-        if custom_attention_weights is None:
-            scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
-        else:
-            scaled_attention, attention_weights = simple_attention(custom_attention_weights, v)
+        scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
 
         scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len_q, num_heads, depth)
 
@@ -154,7 +145,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         output = self.dense(concat_attention)  # (batch_size, seq_len_q, d_model)
 
-        return output, attention_weights
+        return output, attention_weights, unsplit_k
 
 ## Point Wise Feed Forward Network
 
@@ -196,15 +187,15 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, training, mask, custom_attention_weights=None):
-        attn_output, attn_weights = self.mha(x, x, x, mask, custom_attention_weights=custom_attention_weights)  # (batch_size, input_seq_len, d_model)
+    def call(self, x, training, mask, custom_k=None):
+        attn_output, attn_weights, k = self.mha(x, x, x, mask, custom_k=custom_k)  # (batch_size, input_seq_len, d_model)
         attn_output = self.dropout1(attn_output, training=training)
         out1 = self.layernorm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
 
         ffn_output = self.ffn(out1)  # (batch_size, input_seq_len, d_model)
         ffn_output = self.dropout2(ffn_output, training=training)
         out2 = self.layernorm2(out1 + ffn_output)  # (batch_size, input_seq_len, d_model)
-        return out2, attn_weights
+        return out2, attn_weights, k
 
 
 class Encoder(tf.keras.layers.Layer):
@@ -237,10 +228,11 @@ class Encoder(tf.keras.layers.Layer):
         
         self.dropout = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, training, mask, custom_attention_weights=None):
+    def call(self, x, training, mask, custom_k=None):
 
         seq_len = tf.shape(x)[1]
         attention_weights = []
+        ks = []
 
         # adding embedding and position encoding.
         x = self.embedding(x)  # (batch_size, input_seq_len, d_model)
@@ -250,16 +242,19 @@ class Encoder(tf.keras.layers.Layer):
 
         x = self.dropout(x, training=training)
 
-        # custom_attention_weights - (num_layers, batch, ...)
+        # custom_k - (num_layers, batch, ...)
         for i in range(self.num_layers):
-
-            x, layer_weights = self.enc_layers[i](x, training, mask, custom_attention_weights=custom_attention_weights[i] if custom_attention_weights is not None else None)
+            
+            x, layer_weights, k = self.enc_layers[i](x, training, mask, custom_k=custom_k) # All the ks are the same here - keep the last one
             attention_weights.append(layer_weights)
+            
         attention_weights = tf.stack(attention_weights)                        # (num_layers, batch, ...)
         attention_weights = tf.transpose(attention_weights, perm=[1, 0, 2, 3, 4]) 
+        
 
         return (x,                   # (batch, input_seq_len, d_model)
-               attention_weights)    # (batch, num_layers, seq_len, seq_len)
+               attention_weights,    # (batch, num_layers, seq_len, seq_len)
+               k)                    # (batch, seq_len, d_model)
 
 class TransformerEncoderClassifier(tf.keras.Model):
     """ Transformer Encoder Classifier consists of the encoder, and a final
@@ -274,14 +269,12 @@ class TransformerEncoderClassifier(tf.keras.Model):
                                use_positional_encoding=use_positional_encoding)
         self.final_layer = tf.keras.layers.Dense(1)
         
-    def call(self, inp, training, custom_attention_weights=None):
+    def call(self, inp, training, custom_k=None):
+        # custom_k == (num_layers, batch, seq_len, d_model)
         # enc_padding_mask.shape == (batch_size, 1, 1, seq_len)  - Andriy
 
         enc_padding_mask = create_padding_mask(inp)
-        if custom_attention_weights is not None:
-            # Switch batch and num layers dimensions
-            custom_attention_weights = tf.transpose(custom_attention_weights, perm=[1, 0, 2, 3, 4]) # (num_layers, batch, num_heads, seqlen, seqlen)
-        enc_output, attention_weights = self.encoder(inp, training, enc_padding_mask, custom_attention_weights=custom_attention_weights)  # (batch_size, seq_len, d_model)
+        enc_output, attention_weights, k = self.encoder(inp, training, enc_padding_mask, custom_k=custom_k)  # (batch_size, seq_len, d_model)
         # enc_output.shape == (batch_size, seq_len, d_model)
         if enc_padding_mask is not None:
             enc_padding_mask = tf.squeeze(enc_padding_mask, [1, 2]) # (batch_size, seq_len)
@@ -293,4 +286,6 @@ class TransformerEncoderClassifier(tf.keras.Model):
         enc_output = tf.reduce_sum(enc_output, 1)
         final_output = self.final_layer(enc_output)
         final_output = tf.squeeze(final_output, 1)     
-        return final_output, attention_weights
+        return (final_output,   # (batch, seq_len, d_model)
+            attention_weights,  # (batch, num_layers, seq_len, seq_len)
+            k)                  # (batch, seq_len, d_model)
