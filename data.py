@@ -6,7 +6,7 @@ BATCH_SIZE = 64
 MAX_LENGTH = 200
 
 ## Setup input pipline
-def get_datasets(data_dir='data', max_length=MAX_LENGTH):
+def get_datasets(data_dir='data', max_length=MAX_LENGTH, batch_size=BATCH_SIZE):
     """
     Use [TFDS](https://www.tensorflow.org/datasets) to load the IMDB movie reviews dataset with labels for positive or negative sentiments.
 
@@ -24,11 +24,11 @@ def get_datasets(data_dir='data', max_length=MAX_LENGTH):
     # cache the dataset to memory to get a speedup while reading from it.
     train_dataset = train_dataset.cache()
     train_dataset = train_dataset.shuffle(BUFFER_SIZE).padded_batch(
-        BATCH_SIZE, padded_shapes=train_examples.output_shapes)
+        batch_size, padded_shapes=train_examples.output_shapes)
     train_dataset = train_dataset.prefetch(tf.data.experimental.AUTOTUNE)
 
     test_dataset = test_examples.filter(filter_max_length)
     test_dataset = test_dataset.padded_batch(
-        BATCH_SIZE, padded_shapes=train_examples.output_shapes)
+        batch_size, padded_shapes=train_examples.output_shapes)
 
     return (train_dataset, test_dataset), info
