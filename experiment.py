@@ -3,7 +3,7 @@ import tensorflow.keras.callbacks as cb
 from model import TransformerEncoderClassifier
 from data  import get_datasets
 from tensorflow.keras.callbacks import Callback
-import plac
+
 import os
 
 def study(results_dir="results", models_dir="models", data_dir="data", max_epochs=100, load_checkpoint=False):
@@ -116,10 +116,16 @@ def train_batch(epoch, batch, x, y, model, optimizer, metrics):
     metrics.update_state(y_true=y, y_pred=logits)
     
 
-def evaluate(model, test_dataset):
+def evaluate(model, test_dataset,adv = None):
     metrics = tf.keras.metrics.Accuracy()
     for (x, y) in test_dataset:
-        (logits, _weights) = model(x, training=False)
+        if adv is not None:
+            logits, _weights,_wk = model(x, training=False)
+            adv_k = adv(_wk,training = False)
+            logits, _weights,_wk = model(x,custom_k = adv_k, training=False)
+            print("here")
+        else:
+            logits, _weights,_ = model(x, training=False)
         predicted = tf.cast(tf.round(tf.nn.sigmoid(logits)), dtype=tf.int64)
         metrics.update_state(y_true=y, y_pred=predicted)
 
