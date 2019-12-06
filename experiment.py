@@ -28,11 +28,10 @@ def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None
         sent = 'neg'
     return sent, attn_weights
 
-def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=50):
+def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=50, random_k=True):
     """
     x - (batch, text)
     y - (batch, label)
-    adv_k - If not None will start with this k instead.
     
     Passes x through transformer and receives y_logits, w, k.
     Creates an adversarial model - adv.
@@ -59,6 +58,9 @@ def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=50):
     
 
     y_logits, w, k = transformer(x, training=False)
+    if random_k: # Randomize k
+        k = tf.random.uniform(tf.shape(k))
+
     print(f'Returned k: {tf.shape(k)}')
     y_logits2, _, _ = transformer(x, training=False, custom_k=k)
     
