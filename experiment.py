@@ -6,6 +6,104 @@ from tensorflow.keras.callbacks import Callback
 
 import os
 
+    
+def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None):
+    inp_sentence = encoder.encode(inp_sentence) 
+
+    encoder_input = tf.expand_dims(inp_sentence, 0)
+    if adv_k is not None:
+        predictions, attn_weights,_ = transformer(encoder_input,custom_k=adv_k ,training=False)
+    elif adv_model is not None:
+        y_logits, w, k = transformer(encoder_input, training=False)
+        adv_k = adv_model(k, training=False)
+        predictions, attn_weights, adv_k = transformer(encoder_input, custom_k=adv_k ,training=False)
+            
+    else:
+        predictions, attn_weights,_ = transformer(encoder_input ,training=False)
+    
+    sent = tf.squeeze(predictions, axis=0)
+    if sent >= 0.5:
+        sent = 'pos'
+    else:
+        sent = 'neg'
+    return sent, attn_weights
+
+def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=50):
+    """
+    x - (batch, text)
+    y - (batch, label)
+    adv_k - If not None will start with this k instead.
+    
+    Passes x through transformer and receives y_logits, w, k.
+    Creates an adversarial model - adv.
+    Pass k through adv model and receives adv_k.
+    Computes loss by passing (x, custom_k=adv_k) through transformer:
+        Receives adv_y_logits, adv_w, adv_k (same k)
+        loss_t = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=adv_y_logits, from_logits=True)
+        loss_k = - |k - adv_k|
+        loss = loss_t + loss_k
+    
+    Returns: 
+        k - original k
+        w - original attention weights
+        adv_k - adversarial k
+        adv_w - adversarial attention weights w
+        loss_k - the one that is maximized
+        loss_t - transformer loss (the one that is minimized)
+        loss - adversarial loss, e.g.  loss = loss_t = loss_k
+    """
+    D_MODEL = 128
+
+    best_loss_t = None
+    best_adv_k = None
+    
+
+    y_logits, w, k = transformer(x, training=False)
+    print(f'Returned k: {tf.shape(k)}')
+    y_logits2, _, _ = transformer(x, training=False, custom_k=k)
+    
+    
+    loss_t = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=y_logits, from_logits=True)
+    best_loss_t = loss_t
+    original_loss_t = loss_t
+    original_k = k
+    
+    print(f'[{0}] Loss_t = {loss_t:<20.10}')
+    loss_t = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=y_logits2, from_logits=True)
+    print(f'[{0}] Loss_t (custom k) = {loss_t:<20.10}')
+    
+    alpha = 0.5
+    
+    
+    for epoch in range(1, epochs+1):        
+        with tf.GradientTape() as tape:
+            adv_k = adv_model(k, training=True)
+            if best_adv_k is None:
+                best_adv_k = adv_k
+            
+            adv_y_logits, adv_w, adv_k2  = transformer(x, custom_k=adv_k, training=False)
+            cond = tf.reduce_all(tf.equal(adv_k, adv_k2)).numpy()
+            bs = tf.shape(k)[0]
+            assert cond == True
+            loss_t = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=adv_y_logits, from_logits=True)
+            summed = tf.math.reduce_sum(tf.math.pow(tf.reshape(k, [bs, -1]) - tf.reshape(adv_k, [bs, -1]), 2), axis=1)
+            
+            loss_k = - tf.math.log(tf.math.reduce_mean(summed))
+            
+            loss = alpha*loss_t + (1 - alpha)*loss_k
+            
+            if loss_t < best_loss_t:
+                best_loss_t = loss_t
+                best_adv_k  = adv_k
+            
+        
+        print(f'[{epoch:<2}] Loss_t = {loss_t:<20.10}  Loss_k = {loss_k:<20.10}   Loss = {loss:<20.10}')
+
+        grads = tape.gradient(loss, adv_model.trainable_weights)                
+        adv_optimizer.apply_gradients(zip(grads, adv_model.trainable_weights))
+  
+    return original_loss_t, original_k, best_loss_t, best_adv_k
+
 def study(results_dir="results", models_dir="models", data_dir="data", max_epochs=100, load_checkpoint=False):
     if not tf.io.gfile.exists(results_dir):
         tf.io.gfile.mkdir(results_dir)
