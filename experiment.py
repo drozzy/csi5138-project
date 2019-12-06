@@ -116,16 +116,15 @@ def train_batch(epoch, batch, x, y, model, optimizer, metrics):
     metrics.update_state(y_true=y, y_pred=logits)
     
 
-def evaluate(model, test_dataset,adv = None):
+def evaluate(model, test_dataset, adv_model=None):
     metrics = tf.keras.metrics.Accuracy()
     for (x, y) in test_dataset:
-        if adv is not None:
-            logits, _weights,_wk = model(x, training=False)
-            adv_k = adv(_wk,training = False)
-            logits, _weights,_wk = model(x,custom_k = adv_k, training=False)
-            print("here")
+        if adv_model is not None:
+            logits, _, k = model(x, training=False)
+            adv_k = adv_model(k, training = False)
+            logits, _, k = model(x, custom_k=adv_k, training=False)
         else:
-            logits, _weights,_ = model(x, training=False)
+            logits, _, _ = model(x, training=False)
         predicted = tf.cast(tf.round(tf.nn.sigmoid(logits)), dtype=tf.int64)
         metrics.update_state(y_true=y, y_pred=predicted)
 
