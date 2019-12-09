@@ -5,7 +5,7 @@ from data  import get_datasets
 from tensorflow.keras.callbacks import Callback
 from bertviz import head_view
 import torch
-
+import model_adv
 import os
 
 def decode_sentence(s, encoder):
@@ -101,6 +101,7 @@ def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=1, random_k=F
             loss_k = - tf.math.log(tf.math.reduce_mean(summed))
             
             loss = alpha*loss_t + (1 - alpha)*loss_k
+             
             
             if loss_t < best_loss_t:
                 best_loss_t = loss_t
@@ -171,7 +172,7 @@ class EarlyStop(object):
         self.stop = (self.steps >= self.patience)
 
 def fit_data(max_epochs, model, optimizer, checkpoint, manager, train_dataset, test_dataset, results_dir="results", 
-        models_dir="checkpoints"):
+        models_dir="checkpoints",train_with_adv_k = False):
     model_path=os.path.join(models_dir, "train")
 
     early_stop = EarlyStop(patience=3)
@@ -185,7 +186,7 @@ def fit_data(max_epochs, model, optimizer, checkpoint, manager, train_dataset, t
         print(f"Epoch {epoch}")
         metrics.reset_states()
 
-        train_epoch(epoch, model, optimizer, train_dataset, metrics)
+        train_epoch(epoch, model, optimizer, train_dataset, metrics,train_with_adv_k)
 
         test_metrics = evaluate(model, test_dataset) 
         report_progress(metrics, test_metrics)
@@ -203,15 +204,37 @@ def fit_data(max_epochs, model, optimizer, checkpoint, manager, train_dataset, t
     checkpoint.restore(save_path)
         
 
-def train_epoch(epoch, model, optimizer, train_dataset, metrics):
+def train_epoch(epoch, model, optimizer, train_dataset, metrics,train_with_adv_k):
 
     for batch, (x, y) in enumerate(train_dataset):
-        train_batch(epoch, batch, x, y, model, optimizer, metrics)        
+        if train_with_adv_k :
+            train_batch_with_k_adv(epoch, batch, x, y, model, optimizer, metrics)
+        else:
+            train_batch(epoch, batch, x, y, model, optimizer, metrics) 
+        
 
 def train_batch(epoch, batch, x, y, model, optimizer, metrics):
 
     with tf.GradientTape() as tape:
         (logits, _weights) = model(x, training=True)
+        
+        loss = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=logits, from_logits=True)
+
+    grads = tape.gradient(loss, model.trainable_weights)                
+    optimizer.apply_gradients(zip(grads, model.trainable_weights))
+
+    metrics.update_state(y_true=y, y_pred=logits)
+    
+def train_batch_with_k_adv(epoch, batch, x, y, model, optimizer, metrics):
+    D_MODEL = 128
+    adv_model, adv_optimizer = model_adv.create_model(models_dir="adv", load_checkpoint=False, 
+                                            run_eagerly=True, d_model=D_MODEL)  
+    loss_t, k, best_loss_t, best_adv_k = find_adv_k(x, y, model,
+                adv_model, adv_optimizer, epochs=20,random_k=True)
+    
+    
+    with tf.GradientTape() as tape:
+        logits, w, k = model(x,custom_k = best_adv_k, training=True)
         
         loss = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=logits, from_logits=True)
 
@@ -232,6 +255,24 @@ def evaluate(model, test_dataset, adv_model=None):
             logits, _, _ = model(x, training=False)
         predicted = tf.cast(tf.round(tf.nn.sigmoid(logits)), dtype=tf.int64)
         metrics.update_state(y_true=y, y_pred=predicted)
+
+    return metrics
+
+def evaluate_with_k(model, test_dataset, adv_model=None):
+    metrics = tf.keras.metrics.Accuracy()
+    for (x, y) in test_dataset:
+        adv_model, adv_optimizer = model_adv.create_model(models_dir="adv", load_checkpoint=False, 
+                                            run_eagerly=True, d_model=128)
+        
+        loss_t, k, best_loss_t, best_adv_k = find_adv_k(x, y, model,
+                adv_model, adv_optimizer, epochs=30,random_k=False)
+        
+        logits, _, k = model(x, custom_k=best_adv_k, training=False)
+
+        predicted = tf.cast(tf.round(tf.nn.sigmoid(logits)), dtype=tf.int64)
+        metrics.update_state(y_true=y, y_pred=predicted)
+        print(metrics.result().numpy())
+    
 
     return metrics
 
