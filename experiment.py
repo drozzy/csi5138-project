@@ -172,23 +172,24 @@ class EarlyStop(object):
         self.stop = (self.steps >= self.patience)
 
 def fit_data(max_epochs, model, optimizer, checkpoint, manager, train_dataset, test_dataset, results_dir="results", 
-        models_dir="checkpoints",train_with_adv_k = False):
+        models_dir="checkpoints", use_sparsemax=False, patience=3):
     model_path=os.path.join(models_dir, "train")
 
-    early_stop = EarlyStop(patience=3)
+    early_stop = EarlyStop(patience=patience)
 
     metrics = tf.keras.metrics.BinaryCrossentropy(from_logits=True)
 
-    initial_test_metrics = evaluate(model, test_dataset)
-    report_progress(None, initial_test_metrics)
+    # initial_test_metrics = evaluate(model, test_dataset, use_sparsemax=use_sparsemax)
+    # report_progress(None, initial_test_metrics)
 
     for epoch in range(1, max_epochs + 1):
         print(f"Epoch {epoch}")
         metrics.reset_states()
 
-        train_epoch(epoch, model, optimizer, train_dataset, metrics,train_with_adv_k)
+        train_epoch(epoch, model, optimizer, train_dataset, metrics, use_sparsemax)
 
-        test_metrics = evaluate(model, test_dataset) 
+        # test_metrics = evaluate(model, test_dataset, use_sparsemax=use_sparsemax) 
+        test_metrics = evaluate(model, test_dataset, use_sparsemax=use_sparsemax) 
         report_progress(metrics, test_metrics)
 
         early_stop.step(test_metrics.result().numpy())
@@ -204,75 +205,35 @@ def fit_data(max_epochs, model, optimizer, checkpoint, manager, train_dataset, t
     checkpoint.restore(save_path)
         
 
-def train_epoch(epoch, model, optimizer, train_dataset, metrics,train_with_adv_k):
+def train_epoch(epoch, model, optimizer, train_dataset, metrics, use_sparsemax):
 
     for batch, (x, y) in enumerate(train_dataset):
-        if train_with_adv_k :
-            train_batch_with_k_adv(epoch, batch, x, y, model, optimizer, metrics)
-        else:
-            train_batch(epoch, batch, x, y, model, optimizer, metrics) 
+        train_batch(epoch, batch, x, y, model, optimizer, metrics, use_sparsemax) 
         
 
-def train_batch(epoch, batch, x, y, model, optimizer, metrics):
+def train_batch(epoch, batch, x, y, model, optimizer, metrics, use_sparsemax):
 
     with tf.GradientTape() as tape:
-        (logits, _weights) = model(x, training=True)
+        (logits, _weights, _k) = model(x, training=True, use_sparsemax=use_sparsemax)
         
         loss = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=logits, from_logits=True)
 
     grads = tape.gradient(loss, model.trainable_weights)                
     optimizer.apply_gradients(zip(grads, model.trainable_weights))
 
-    metrics.update_state(y_true=y, y_pred=logits)
-    
-def train_batch_with_k_adv(epoch, batch, x, y, model, optimizer, metrics):
-    D_MODEL = 128
-    adv_model, adv_optimizer = model_adv.create_model(models_dir="adv", load_checkpoint=False, 
-                                            run_eagerly=True, d_model=D_MODEL)  
-    loss_t, k, best_loss_t, best_adv_k = find_adv_k(x, y, model,
-                adv_model, adv_optimizer, epochs=20,random_k=True)
-    
-    
-    with tf.GradientTape() as tape:
-        logits, w, k = model(x,custom_k = best_adv_k, training=True)
-        
-        loss = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=logits, from_logits=True)
+    metrics.update_state(y_true=y, y_pred=logits)  
 
-    grads = tape.gradient(loss, model.trainable_weights)                
-    optimizer.apply_gradients(zip(grads, model.trainable_weights))
-
-    metrics.update_state(y_true=y, y_pred=logits)
-    
-
-def evaluate(model, test_dataset, adv_model=None):
+def evaluate(model, test_dataset, adv_model=None, use_sparsemax=False):
     metrics = tf.keras.metrics.Accuracy()
     for (x, y) in test_dataset:
         if adv_model is not None:
-            logits, _, k = model(x, training=False)
+            logits, _, k = model(x, training=False, use_sparsemax=use_sparsemax)
             adv_k = adv_model(k, training = False)
-            logits, _, k = model(x, custom_k=adv_k, training=False)
+            logits, _, k = model(x, custom_k=adv_k, training=False, use_sparsemax=use_sparsemax)
         else:
-            logits, _, _ = model(x, training=False)
+            logits, _, _ = model(x, training=False, use_sparsemax=use_sparsemax)
         predicted = tf.cast(tf.round(tf.nn.sigmoid(logits)), dtype=tf.int64)
         metrics.update_state(y_true=y, y_pred=predicted)
-
-    return metrics
-
-def evaluate_with_k(model, test_dataset, adv_model=None):
-    metrics = tf.keras.metrics.Accuracy()
-    for (x, y) in test_dataset:
-        adv_model, adv_optimizer = model_adv.create_model(models_dir="adv", load_checkpoint=False, 
-                                            run_eagerly=True, d_model=128)
-        
-        loss_t, k, best_loss_t, best_adv_k = find_adv_k(x, y, model,
-                adv_model, adv_optimizer, epochs=30,random_k=False)
-        
-        logits, _, k = model(x, custom_k=best_adv_k, training=False)
-
-        predicted = tf.cast(tf.round(tf.nn.sigmoid(logits)), dtype=tf.int64)
-        metrics.update_state(y_true=y, y_pred=predicted)
-        print(metrics.result().numpy())
-    
 
     return metrics
 
@@ -286,7 +247,7 @@ def shuffle_weights(weights):
     return tf.transpose(tf.random.shuffle(tf.transpose(weights)))    
 
 def create_model(load_checkpoint, vocab_size, use_positional_encoding, 
-        models_dir="checkpoints", run_eagerly=False):
+        models_dir="checkpoints", run_eagerly=False, learning_rate=0.001):
     
     num_layers = 4
     d_model = 128
@@ -302,7 +263,7 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding,
     # loss_function = tf.keras.losses.BinaryCrossentropy(from_logits=True)
     transformer.run_eagerly = run_eagerly
 
-    optimizer = tf.keras.optimizers.Adam()    
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)    
     checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=transformer)    
     manager = tf.train.CheckpointManager(checkpoint, models_dir, max_to_keep=3)
 

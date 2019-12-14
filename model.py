@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
-
+# from sparsemax2 import sparsemax
+from entfox import entmax15
 ## Positional Encoding 
 
 def get_angles(pos, i, d_model):
@@ -39,7 +40,7 @@ def create_padding_mask(seq):
 
 ## Scaled Dot Product Attention
 
-def scaled_dot_product_attention(q, k, v, mask):
+def scaled_dot_product_attention(q, k, v, mask, use_sparsemax=False):
     """Calculate the attention weights.
     q, k, v must have matching leading dimensions.
     k, v must have matching penultimate dimension, i.e.: seq_len_k = seq_len_v.
@@ -69,7 +70,17 @@ def scaled_dot_product_attention(q, k, v, mask):
 
     # softmax is normalized on the last axis (seq_len_k) so that the scores
     # add up to 1.
-    attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
+    if use_sparsemax:
+        # scaled_attention_logits = tf.dtypes.cast(scaled_attention_logits, tf.float64)
+        # shape_tmp = tf.shape(scaled_attention_logits)
+        # scaled_attention_logits = tf.reshape(scaled_attention_logits, [-1, shape_tmp[-1]])
+        attention_weights = entmax15(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
+        # attention_weights = tf.reshape(attention_weights, shape_tmp)
+        # attention_weights = tf.dtypes.cast(scaled_attention_logits, tf.float32)
+        # print(tf.math.count_nonzero(attention_weights, axis=-1))
+    else:    
+        print("SHOULD NOT BE HERE!!!!!")
+        attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
 
     output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
 
@@ -116,7 +127,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
         x = tf.reshape(x, (batch_size, -1, self.num_heads, self.depth))
         return tf.transpose(x, perm=[0, 2, 1, 3])
     
-    def call(self, v, k, q, mask, custom_k=None):
+    def call(self, v, k, q, mask, custom_k=None, use_sparsemax=False):
         batch_size = tf.shape(q)[0]
         
         q = self.wq(q)  # (batch_size, seq_len, d_model)
@@ -138,7 +149,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
         # scaled_attention.shape == (batch_size, num_heads, seq_len_q, depth)
         # attention_weights.shape == (batch_size, num_heads, seq_len_q, seq_len_k)
-        scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask)
+        scaled_attention, attention_weights = scaled_dot_product_attention(q, k, v, mask, use_sparsemax)
 
         scaled_attention = tf.transpose(scaled_attention, perm=[0, 2, 1, 3])  # (batch_size, seq_len_q, num_heads, depth)
 
@@ -189,9 +200,9 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(rate)
         self.dropout2 = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, training, mask, custom_k=None):
-        attn_output, attn_weights, k = self.mha(x, x, x, mask, custom_k=custom_k)  # (batch_size, input_seq_len, d_model)
-        attn_output = self.dropout1(attn_output, training=training)
+    def call(self, x, training, mask, custom_k=None, use_sparsemax=False):
+        attn_output, attn_weights, k = self.mha(x, x, x, mask, custom_k=custom_k, use_sparsemax=use_sparsemax)  # (batch_size, input_seq_len, d_model)
+        # attn_output = self.dropout1(attn_output, training=training)
         out1 = self.layernorm1(x + attn_output)  # (batch_size, input_seq_len, d_model)
 
         ffn_output = self.ffn(out1)  # (batch_size, input_seq_len, d_model)
@@ -230,7 +241,7 @@ class Encoder(tf.keras.layers.Layer):
         
         self.dropout = tf.keras.layers.Dropout(rate)
 
-    def call(self, x, training, mask, custom_k=None):
+    def call(self, x, training, mask, custom_k=None, use_sparsemax=False):
 
         seq_len = tf.shape(x)[1]
         attention_weights = []
@@ -246,7 +257,7 @@ class Encoder(tf.keras.layers.Layer):
         # custom_k - (num_layers, batch, ...)
         for i in range(self.num_layers):
             
-            x, layer_weights, k = self.enc_layers[i](x, training, mask, custom_k=custom_k[i] if custom_k is not None else None) 
+            x, layer_weights, k = self.enc_layers[i](x, training, mask, custom_k=custom_k[i] if custom_k is not None else None, use_sparsemax=use_sparsemax) 
             ks.append(k)
             attention_weights.append(layer_weights)
             
@@ -273,14 +284,14 @@ class TransformerEncoderClassifier(tf.keras.Model):
                                use_positional_encoding=use_positional_encoding)
         self.final_layer = tf.keras.layers.Dense(1)
         
-    def call(self, inp, training, custom_k=None):
+    def call(self, inp, training, custom_k=None, use_sparsemax=False):
         # custom_k == (num_layers, batch, seq_len, d_model)
         # enc_padding_mask.shape == (batch_size, 1, 1, seq_len)  - Andriy
         if custom_k is not None:
             custom_k = tf.transpose(custom_k, perm=[1, 0, 2, 3])  # (num_layers, batch, seq_len, d_model)
 
         enc_padding_mask = create_padding_mask(inp)
-        enc_output, attention_weights, k = self.encoder(inp, training, enc_padding_mask, custom_k=custom_k)  # (batch_size, seq_len, d_model)
+        enc_output, attention_weights, k = self.encoder(inp, training, enc_padding_mask, custom_k=custom_k, use_sparsemax=use_sparsemax)  # (batch_size, seq_len, d_model)
         # enc_output.shape == (batch_size, seq_len, d_model)
         if enc_padding_mask is not None:
             enc_padding_mask = tf.squeeze(enc_padding_mask, [1, 2]) # (batch_size, seq_len)
