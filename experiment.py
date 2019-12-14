@@ -3,35 +3,13 @@ import tensorflow.keras.callbacks as cb
 from model import TransformerEncoderClassifier
 from data  import get_datasets
 from tensorflow.keras.callbacks import Callback
-from bertviz import head_view
-import torch
 import model_adv
 import os
 
-def decode_sentence(s, encoder):
-    # s here is x[0] from some batch.
-    s_str = encoder.decode(s)
-    # Get rid of padding
-    tokens = [encoder.decode([w]) for w in s if w != 0]
-    return s_str, tokens
-
-def visualize(tokens, weights):    
-    # weights - is weights[0] from some batch (e.g. from get_prediction)
-    # Make sure to include this in Jupyter Notebook:
-    """
-    %%javascript
-    require.config({
-      paths: {
-          d3: '//cdnjs.cloudflare.com/ajax/libs/d3/3.4.8/d3.min',
-          jquery: '//ajax.googleapis.com/ajax/libs/jquery/2.0.0/jquery.min',
-      }
-    });
-    """
-    head_view(torch.tensor(weights.numpy()), tokens)
-
-def get_prediction(inp_sentence, encoder, transformer, adv_k = None, adv_model = None):
+    
+def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None):
     inp_sentence = encoder.encode(inp_sentence) 
-
+    tokens = [encoder.decode([w]) for w in inp_sentence]
     encoder_input = tf.expand_dims(inp_sentence, 0)
     if adv_k is not None:
         predictions, attn_weights,_ = transformer(encoder_input,custom_k=adv_k ,training=False)
@@ -43,26 +21,35 @@ def get_prediction(inp_sentence, encoder, transformer, adv_k = None, adv_model =
     else:
         predictions, attn_weights,_ = transformer(encoder_input ,training=False)
     
-    return predictions, attn_weights
-
-def get_sentiment(prediction):
-    sent = tf.squeeze(prediction, axis=0)
-    return 'pos' if sent >= 0.5 else 'neg'    
-
-def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None):
-    predictions, attn_weights = get_prediction(inp_sentence, encoder, transformer, adv_k, adv_model)
-    
     sent = tf.squeeze(predictions, axis=0)
     if sent >= 0.5:
         sent = 'pos'
     else:
         sent = 'neg'
-    return sent, attn_weights
+    return sent, attn_weights, tokens
 
-def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=1, random_k=False):
+def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=50, random_k=True, k_diff = True):
     """
     x - (batch, text)
     y - (batch, label)
+    
+    Passes x through transformer and receives y_logits, w, k.
+    Creates an adversarial model - adv.
+    Pass k through adv model and receives adv_k.
+    Computes loss by passing (x, custom_k=adv_k) through transformer:
+        Receives adv_y_logits, adv_w, adv_k (same k)
+        loss_t = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=adv_y_logits, from_logits=True)
+        loss_k = - |k - adv_k|
+        loss = loss_t + loss_k
+    
+    Returns: 
+        k - original k
+        w - original attention weights
+        adv_k - adversarial k
+        adv_w - adversarial attention weights w
+        loss_k - the one that is maximized
+        loss_t - transformer loss (the one that is minimized)
+        loss - adversarial loss, e.g.  loss = loss_t = loss_k
     """
     D_MODEL = 128
 
@@ -74,6 +61,7 @@ def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=1, random_k=F
     if random_k: # Randomize k
         k = tf.random.uniform(tf.shape(k))
 
+    print(f'Returned k: {tf.shape(k)}')
     y_logits2, _, _ = transformer(x, training=False, custom_k=k)
     
     
@@ -82,8 +70,12 @@ def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=1, random_k=F
     original_loss_t = loss_t
     original_k = k
     
+    print(f'[{0}] Loss_t = {loss_t:<20.10}')
     loss_t = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=y_logits2, from_logits=True)
+    print(f'[{0}] Loss_t (custom k) = {loss_t:<20.10}')
+    
     alpha = 0.5
+    
     
     for epoch in range(1, epochs+1):        
         with tf.GradientTape() as tape:
@@ -99,14 +91,19 @@ def find_adv_k(x, y, transformer, adv_model, adv_optimizer, epochs=1, random_k=F
             summed = tf.math.reduce_sum(tf.math.pow(tf.reshape(k, [bs, -1]) - tf.reshape(adv_k, [bs, -1]), 2), axis=1)
             
             loss_k = - tf.math.log(tf.math.reduce_mean(summed))
-            
-            loss = alpha*loss_t + (1 - alpha)*loss_k
+            if k_diff:
+                loss = alpha*loss_t + (1 - alpha)*loss_k
+            else:
+                loss = loss_t
              
             
             if loss_t < best_loss_t:
                 best_loss_t = loss_t
                 best_adv_k  = adv_k
             
+        
+        print(f'[{epoch:<2}] Loss_t = {loss_t:<20.10}  Loss_k = {loss_k:<20.10}   Loss = {loss:<20.10}')
+
         grads = tape.gradient(loss, adv_model.trainable_weights)                
         adv_optimizer.apply_gradients(zip(grads, adv_model.trainable_weights))
   
@@ -216,7 +213,7 @@ def train_epoch(epoch, model, optimizer, train_dataset, metrics,train_with_adv_k
 def train_batch(epoch, batch, x, y, model, optimizer, metrics):
 
     with tf.GradientTape() as tape:
-        (logits, _weights) = model(x, training=True)
+        logits, w, k = model(x, training=True)
         
         loss = tf.keras.losses.binary_crossentropy(y_true=y, y_pred=logits, from_logits=True)
 
