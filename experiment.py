@@ -7,19 +7,19 @@ import model_adv
 import os
 
     
-def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None):
+def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None, use_sparsemax=False):
     inp_sentence = encoder.encode(inp_sentence) 
     tokens = [encoder.decode([w]) for w in inp_sentence]
     encoder_input = tf.expand_dims(inp_sentence, 0)
     if adv_k is not None:
-        predictions, attn_weights,_ = transformer(encoder_input,custom_k=adv_k ,training=False)
+        predictions, attn_weights,_ = transformer(encoder_input,custom_k=adv_k ,training=False, use_sparsemax=use_sparsemax)
     elif adv_model is not None:
-        y_logits, w, k = transformer(encoder_input, training=False)
+        y_logits, w, k = transformer(encoder_input, training=False, use_sparsemax=use_sparsemax)
         adv_k = adv_model(k, training=False)
-        predictions, attn_weights, adv_k = transformer(encoder_input, custom_k=adv_k ,training=False)
+        predictions, attn_weights, adv_k = transformer(encoder_input, custom_k=adv_k ,training=False, use_sparsemax=use_sparsemax)
             
     else:
-        predictions, attn_weights,_ = transformer(encoder_input ,training=False)
+        predictions, attn_weights,_ = transformer(encoder_input ,training=False, use_sparsemax=use_sparsemax)
     
     sent = tf.squeeze(predictions, axis=0)
     if sent >= 0.5:
