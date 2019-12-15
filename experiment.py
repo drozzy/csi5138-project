@@ -6,7 +6,8 @@ from tensorflow.keras.callbacks import Callback
 import model_adv
 import os
 
-    
+REFERENCE_SENTENCE = "This is a very terrible movie . I will never watch this bad movie again ."
+
 def sentiment(inp_sentence, encoder, transformer, adv_k = None, adv_model = None, use_sparsemax=False):
     inp_sentence = encoder.encode(inp_sentence) 
     tokens = [encoder.decode([w]) for w in inp_sentence]
