@@ -13,7 +13,7 @@ def get_datasets(data_dir='data', max_length=MAX_LENGTH, batch_size=BATCH_SIZE):
     This dataset contains 25000 training examples and 25000 test examples.
     Note: To keep this example small and relatively fast, drop examples with some max length.
     """
-    (train_examples, test_examples), info = tfds.load('imdb_reviews/subwords8k',  data_dir=data_dir,
+    (train_examples, test_examples), info = tfds.load('imdb_reviews/subwords32k',  data_dir=data_dir,
     split=['train', 'test'],
     with_info=True, as_supervised=True)
 
