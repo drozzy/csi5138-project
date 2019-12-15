@@ -262,7 +262,7 @@ def create_model(load_checkpoint, vocab_size, use_positional_encoding,
 
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)    
     checkpoint = tf.train.Checkpoint(optimizer=optimizer, model=transformer)    
-    manager = tf.train.CheckpointManager(checkpoint, models_dir, max_to_keep=3)
+    manager = tf.train.CheckpointManager(checkpoint, models_dir, max_to_keep=1)
 
     if load_checkpoint:
         checkpoint.restore(manager.latest_checkpoint)
