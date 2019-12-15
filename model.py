@@ -68,18 +68,11 @@ def scaled_dot_product_attention(q, k, v, mask, use_sparsemax=False):
     if mask is not None:
         scaled_attention_logits += (mask * -1e9)  
 
-    # softmax is normalized on the last axis (seq_len_k) so that the scores
-    # add up to 1.
     if use_sparsemax:
-        # scaled_attention_logits = tf.dtypes.cast(scaled_attention_logits, tf.float64)
-        # shape_tmp = tf.shape(scaled_attention_logits)
-        # scaled_attention_logits = tf.reshape(scaled_attention_logits, [-1, shape_tmp[-1]])
         attention_weights = entmax15(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
-        # attention_weights = tf.reshape(attention_weights, shape_tmp)
-        # attention_weights = tf.dtypes.cast(scaled_attention_logits, tf.float32)
-        # print(tf.math.count_nonzero(attention_weights, axis=-1))
     else:    
-        print("SHOULD NOT BE HERE!!!!!")
+        # softmax is normalized on the last axis (seq_len_k) so that the scores
+        # add up to 1.
         attention_weights = tf.nn.softmax(scaled_attention_logits, axis=-1)  # (..., seq_len_q, seq_len_k)
 
     output = tf.matmul(attention_weights, v)  # (..., seq_len_q, depth_v)
